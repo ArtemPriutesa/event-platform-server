@@ -1,0 +1,94 @@
+{
+  "payments": [
+    {
+      "_id": "payment-succeeded-example",
+      "reservationPublicId": "C3000000-0000-4000-8000-000000000001",
+      "userPublicId": "B2000000-0000-4000-8000-000000000001",
+      "eventPublicId": "A1000000-0000-4000-8000-000000000001",
+      "eventTitleSnapshot": "Demo Concert",
+      "amount": { "$numberDecimal": "500.00" },
+      "currency": "UAH",
+      "status": "SUCCEEDED",
+      "provider": "demo",
+      "providerPaymentId": "demo-provider-payment-001",
+      "createdAt": { "$date": "2099-05-01T10:00:00Z" },
+      "updatedAt": { "$date": "2099-05-01T10:00:05Z" }
+    },
+    {
+      "_id": "payment-pending-example",
+      "reservationPublicId": "C3000000-0000-4000-8000-000000000002",
+      "userPublicId": "B2000000-0000-4000-8000-000000000001",
+      "amount": { "$numberDecimal": "1200.00" },
+      "currency": "UAH",
+      "status": "PENDING",
+      "createdAt": { "$date": "2099-05-01T10:01:00Z" }
+    }
+  ],
+  "notifications": [
+    {
+      "_id": "ticket-notification-example",
+      "userPublicId": "B2000000-0000-4000-8000-000000000001",
+      "type": "TICKET",
+      "title": "Your ticket is ready",
+      "message": "Open your wallet to view the ticket QR code.",
+      "event": {
+        "eventPublicId": "A1000000-0000-4000-8000-000000000001",
+        "title": "Demo Concert",
+        "startsAt": { "$date": "2099-06-15T15:00:00Z" }
+      },
+      "readAt": null,
+      "createdAt": { "$date": "2099-05-01T10:00:05Z" }
+    }
+  ],
+  "reviews": [
+    {
+      "_id": "E5000000-0000-4000-8000-000000000001",
+      "eventPublicId": "A1000000-0000-4000-8000-000000000001",
+      "eventTitleSnapshot": "Demo Concert",
+      "ticketPublicId": "D4000000-0000-4000-8000-000000000001",
+      "userPublicId": "B2000000-0000-4000-8000-000000000001",
+      "author": {
+        "displayName": "Demo Attendee",
+        "avatarUrl": "https://example.invalid/avatars/demo.png"
+      },
+      "rating": 5,
+      "text": "Great live music and a welcoming venue.",
+      "photos": ["https://example.invalid/events/demo/stage.jpg"],
+      "comments": [
+        {
+          "author": "Event Organizer",
+          "text": "Thank you for coming!",
+          "createdAt": { "$date": "2099-06-16T10:00:00Z" }
+        }
+      ],
+      "discussionId": "F6000000-0000-4000-8000-000000000001",
+      "createdAt": { "$date": "2099-06-16T09:00:00Z" }
+    },
+    {
+      "_id": "E5000000-0000-4000-8000-000000000002",
+      "eventPublicId": "A1000000-0000-4000-8000-000000000001",
+      "eventTitleSnapshot": "Demo Concert",
+      "ticketPublicId": "D4000000-0000-4000-8000-000000000002",
+      "userPublicId": "B2000000-0000-4000-8000-000000000002",
+      "author": { "displayName": "Another Attendee" },
+      "rating": 4,
+      "text": "Excellent performance.",
+      "comments": [],
+      "createdAt": { "$date": "2099-06-16T11:00:00Z" }
+    }
+  ],
+  "discussions": [
+    {
+      "_id": "discussion-message-example",
+      "reviewId": "E5000000-0000-4000-8000-000000000001",
+      "discussionId": "F6000000-0000-4000-8000-000000000001",
+      "author": {
+        "userPublicId": "A7000000-0000-4000-8000-000000000001",
+        "displayName": "Event Organizer"
+      },
+      "text": "Please contact our team for accessibility details.",
+      "attachments": ["https://example.invalid/venue/accessibility-map.png"],
+      "createdAt": { "$date": "2099-06-16T12:00:00Z" }
+    }
+  ]
+}
