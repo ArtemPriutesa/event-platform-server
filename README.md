@@ -2,6 +2,7 @@
 
 Мікросервісна платформа для організаторів, відвідувачів і контролерів подій. Організатори публікують заходи, відвідувачі бронюють і оплачують квитки, а після події залишають відгуки; контролери перевіряють квитки під час входу.
 
+
 ## Контексти та бази даних
 
 | Проєкт | Bounded context | Власні сутності | Персистентність |
@@ -68,3 +69,79 @@ mongosh "mongodb://localhost:27017/event_platform_payments" --file db\p3\seed.js
 - MongoDB має колекції `payments`, `notifications`, `reviews` і `discussions`. Приклади документів: [examples.json](db/p3/examples.json).
 - ERD: [Event Catalog](docs/event-service-erd.drawio) · [Ticketing](docs/ticketing-service-erd.drawio) · [Payments & Feedback](docs/payment-service-erd.drawio). Відкрийте файли на [draw.io](https://app.diagrams.net/).
 - Для перевірки індексів PostgreSQL виконайте `SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public';`. FK між базами відсутні.
+
+## Лабораторна 2: ASP.NET Core / тришаровий сервіс Event Catalog
+
+Єдиний сервіс рішення — Event Catalog, поділений на Domain, BLL, DAL та API. DAL надає generic repository contracts, ADO.NET і Dapper-репозиторії; усі scoped репозиторії в одному запиті використовують спільне з’єднання й транзакцію через Unit of Work. Для подій застосовано параметризований Dapper із базовим `BaseDapperRepository<T>`, а мапінг API DTO налаштовано профілем AutoMapper. Схема та процедури PostgreSQL знаходяться в `db\p1`.
+
+### Aspire, база даних і конфігурація підключення
+
+AppHost запускає PostgreSQL із persistent data volume та EventCatalog API; Aspire передає API connection string через `WithReference`. Потрібен запущений Docker. Після першого старту AppHost застосуйте таблиці, процедури й початкові дані до БД (порт і параметри підключення подивіться в Aspire Dashboard):
+
+```powershell
+psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\schema.sql
+psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\procedures.sql
+psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\seed.sql
+```
+
+```powershell
+dotnet build Platform.sln
+dotnet run --project Platform.AppHost\Platform.AppHost.csproj
+```
+
+Для запуску API поза AppHost збережіть connection string через User Secrets (не в `appsettings.json`):
+
+```powershell
+dotnet user-secrets set "ConnectionStrings:EventCatalog" "Host=localhost;Port=5432;Database=event_catalog;Username=<користувач>;Password=<пароль>" --project Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj
+dotnet run --project Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj --urls http://localhost:5031
+```
+
+Не додавайте паролі у файли репозиторію. Swagger доступний на `/swagger`; `/health` перевіряє з’єднання з PostgreSQL. Якщо connection string відсутній, застосунок завершує запуск із явним повідомленням, без демо-даних.
+
+### API
+
+- `GET /api/events?search=&status=&categoryId=` — пошук і фільтрація подій.
+- `GET /api/events/{id}` — деталі події, місце проведення та теги.
+- `POST /api/events` — створити чернетку разом із місцем проведення.
+- `PUT /api/events/{id}` — оновити чернетку.
+- `POST /api/events/{id}/publish`, `/finish`, `/cancel` — змінити статус із перевіркою дозволеного переходу.
+- `DELETE /api/events/{id}` — м’яко видалити подію.
+- `PUT`/`DELETE /api/events/{id}/tags/{tagId}` — додати/прибрати тег.
+- `GET /api/categories`, `/api/organizers`, `/api/tags` — отримати довідники.
+
+Приклад тіла `POST /api/events`:
+
+```json
+{
+  "organizerId": 1,
+  "categoryId": 1,
+  "title": "Demo event",
+  "description": "Event description",
+  "startsAt": "2099-06-15T18:00:00+03:00",
+  "endsAt": "2099-06-15T21:00:00+03:00",
+  "venue": {
+    "name": "Central Hall",
+    "address": "1 Main Street",
+    "city": "Kyiv",
+    "country": "Ukraine",
+    "capacity": 500
+  }
+}
+```
+
+PowerShell приклад запитів:
+
+```powershell
+$event = @{
+  organizerId = 1
+  categoryId = 1
+  title = "Demo event"
+  startsAt = "2099-06-15T18:00:00+03:00"
+  endsAt = "2099-06-15T21:00:00+03:00"
+  venue = @{ name = "Central Hall"; address = "1 Main Street"; city = "Kyiv"; country = "Ukraine"; capacity = 500 }
+} | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri http://localhost:5031/api/events -ContentType "application/json" -Body $event
+Invoke-RestMethod -Method Get -Uri "http://localhost:5031/api/events?status=PUBLISHED"
+```
+
+Помилки валідації, відсутніх ресурсів і конфліктів повертаються як ProblemDetails.
