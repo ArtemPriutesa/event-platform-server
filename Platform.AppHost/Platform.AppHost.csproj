@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj" />
+    <ProjectReference Include="..\Services\Ticketing\Ticketing.Api\Ticketing.Api.csproj" />
   </ItemGroup>
 
 </Project>
