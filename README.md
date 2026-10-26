@@ -8,7 +8,7 @@
 | Проєкт | Bounded context | Власні сутності | Персистентність |
 |---|---|---|---|
 | №1 | Event Catalog | Organizer, Category, Event, EventVenue, Tag, EventTag | PostgreSQL; Npgsql + процедурний доступ для ADO.NET/Dapper |
-| №2 | Ticketing | TicketType, Reservation, ReservationDetails, ReservationItem, Ticket | PostgreSQL; схема для EF Core Code First / Fluent API |
+| №2 | Ticketing | TicketType, Reservation, ReservationDetails, ReservationItem, Ticket | PostgreSQL; тришаровий ASP.NET Core сервіс, EF Core Code First / Fluent API |
 | №3 | Payments & Feedback | payments, notifications, reviews, discussions | MongoDB; агрегати документів |
 
 Кожна БД має окремого власника даних. Спільних таблиць і foreign key між базами немає. UUID `PublicId` є міжсервісним ідентифікатором; споживачі зберігають його як зовнішнє посилання, а не як FK. Опис агрегатів і узгодженості даних наведено в [документації меж контекстів](docs/bounded-contexts.md).
@@ -33,7 +33,15 @@ SQL-таблиці використовують `BIGINT GENERATED ALWAYS AS IDEN
 
 ## Розгортання локально
 
-Потрібні PostgreSQL 14+ з `psql`/`createdb` і MongoDB з `mongosh`. Наведені команди — для PowerShell з кореня репозиторію. PostgreSQL-сервер має бути запущений, а поточний системний користувач — мати право створювати БД та підключатися до них. Налаштуйте пароль через стандартний механізм PostgreSQL (`.pgpass` або запит `psql`), а не зберігайте його в репозиторії.
+Для запуску сервісів і баз даних потрібен Docker. Запускайте API через Aspire AppHost: він створює ресурси PostgreSQL і автоматично передає кожному сервісу його connection string. Окремо налаштовувати підключення не потрібно.
+
+### Aspire: запуск сервісів
+
+Запустіть API та PostgreSQL через AppHost. Aspire автоматично передає кожному сервісу його connection string:
+
+```powershell
+dotnet run --project Platform.AppHost\Platform.AppHost.csproj --launch-profile http
+```
 
 ### Короткий порядок запуску всіх БД
 
@@ -50,16 +58,15 @@ psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\seed.sql
 psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\verify.sql
 
 # 2. Ticketing
-createdb ticketing
-psql -v ON_ERROR_STOP=1 -d ticketing -f db\p2\schema.sql
-psql -v ON_ERROR_STOP=1 -d ticketing -f db\p2\seed.sql
+# Aspire створює базу ticketing, EF Core застосовує міграції під час запуску API.
+# db\p2\seed.sql можна запускати окремо лише для самостійно створеної бази.
 
 # 3. Payments & Feedback: спочатку колекції та індекси, потім документи
 mongosh "mongodb://localhost:27017/event_platform_payments" --file db\p3\collections.js
 mongosh "mongodb://localhost:27017/event_platform_payments" --file db\p3\seed.js
 ```
 
-Не запускайте повторно `schema.sql` у вже створених БД: ці файли створюють таблиці й не призначені для повторного застосування. Seed-скрипти можна запускати повторно.
+Не запускайте повторно `schema.sql` у вже створених БД: ці файли створюють таблиці й не призначені для повторного застосування. Для Ticketing схему створюють EF Core міграції; не застосовуйте до цієї БД `db\p2\schema.sql` перед міграцією. Seed-скрипти можна запускати повторно.
 
 ## Примітки
 
@@ -72,7 +79,7 @@ mongosh "mongodb://localhost:27017/event_platform_payments" --file db\p3\seed.js
 
 ## Лабораторна 2: ASP.NET Core / тришаровий сервіс Event Catalog
 
-Єдиний сервіс рішення — Event Catalog, поділений на Domain, BLL, DAL та API. DAL надає generic repository contracts, ADO.NET і Dapper-репозиторії; усі scoped репозиторії в одному запиті використовують спільне з’єднання й транзакцію через Unit of Work. Для подій застосовано параметризований Dapper із базовим `BaseDapperRepository<T>`, а мапінг API DTO налаштовано профілем AutoMapper. Схема та процедури PostgreSQL знаходяться в `db\p1`.
+Сервіс Event Catalog поділений на Domain, BLL, DAL та API. DAL надає generic repository contracts, ADO.NET і Dapper-репозиторії; усі scoped репозиторії в одному запиті використовують спільне з’єднання й транзакцію через Unit of Work. Для подій застосовано параметризований Dapper із базовим `BaseDapperRepository<T>`, а мапінг API DTO налаштовано профілем AutoMapper. Схема та процедури PostgreSQL знаходяться в `db\p1`.
 
 ### Aspire, база даних і конфігурація підключення
 
@@ -84,19 +91,17 @@ psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;
 psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\seed.sql
 ```
 
-```powershell
-dotnet build Platform.sln
-dotnet run --project Platform.AppHost\Platform.AppHost.csproj
-```
+### Ticketing API (EF Core)
 
-Для запуску API поза AppHost збережіть connection string через User Secrets (не в `appsettings.json`):
+Aspire запускає окрему базу `ticketing` і сервіс `Ticketing.Api`, передає connection string, а міграції застосовуються автоматично при старті. У Ticketing немає статичних довідникових сутностей зі стабільними ID, тому `HasData` тут недоречний: типи квитків залежать від подій і є транзакційними даними. Для демонстрації в Development після міграцій додається ідемпотентний тип квитка. Swagger доступний на `/swagger`, перевірка БД — на `/health`. Для генерації SQL-скрипту міграції виконайте:
 
 ```powershell
-dotnet user-secrets set "ConnectionStrings:EventCatalog" "Host=localhost;Port=5432;Database=event_catalog;Username=<користувач>;Password=<пароль>" --project Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj
-dotnet run --project Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj --urls http://localhost:5031
+dotnet ef migrations script --idempotent --project Services\Ticketing\Ticketing.Dal --startup-project Services\Ticketing\Ticketing.Api --output db\p2\migrations.sql
 ```
 
-Не додавайте паролі у файли репозиторію. Swagger доступний на `/swagger`; `/health` перевіряє з’єднання з PostgreSQL. Якщо connection string відсутній, застосунок завершує запуск із явним повідомленням, без демо-даних.
+Список квитків підтримує SQL-фільтрацію та пагінацію, наприклад `GET /api/ticket-types?page=1&pageSize=10&search=standard&sortBy=price&sortDir=asc`. Бронювання утримує кількість квитків у транзакції на 15 хвилин; його можна підтвердити для випуску квитків або скасувати для звільнення резерву. `GET /api/reservations/{id}` демонструє eager loading, `/explicit` — explicit loading, а `/ticket-types` — LINQ-запит через проміжну сутність `reservation_items`.
+
+Основні операції: `POST /api/ticket-types`, `PUT /api/ticket-types/{id}/price`, `POST /api/reservations`, `GET /api/reservations/{id}`, `POST /api/reservations/{id}/confirm`, `POST /api/reservations/{id}/cancel`, `POST /api/tickets/{publicId}/use`. POST-запити повертають `201 Created` з Location; невалідне тіло — `400 ValidationProblemDetails`, відсутній ресурс — `404 ProblemDetails`, конфлікт стану чи залишку — `409 ProblemDetails`.
 
 ### API
 

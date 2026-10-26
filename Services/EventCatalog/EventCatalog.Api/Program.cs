@@ -18,7 +18,7 @@ var connectionString = builder.Configuration.GetConnectionString("EventCatalog")
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException(
-        "Missing connection string 'EventCatalog'. Set the ConnectionStrings__EventCatalog environment variable.");
+        "Aspire did not provide the 'EventCatalog' connection string. Start the service through Platform.AppHost.");
 }
 
 DefaultTypeMap.MatchNamesWithUnderscores = true;

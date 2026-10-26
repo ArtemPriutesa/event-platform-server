@@ -4,7 +4,6 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>event-platform-event-catalog-api</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
