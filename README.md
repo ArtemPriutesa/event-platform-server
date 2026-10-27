@@ -145,3 +145,15 @@ Invoke-RestMethod -Method Get -Uri "http://localhost:5031/api/events?status=PUBL
 ```
 
 Помилки валідації, відсутніх ресурсів і конфліктів повертаються як ProblemDetails.
+
+## Лабораторна 4: Reviews API / Clean Architecture та MongoDB
+
+`Services/Reviews` містить окремий мікросервіс із чотирма проєктами та напрямком залежностей `Api → Application → Domain`, `Api → Infrastructure → Application/Domain`. Контролери передають кожну команду й запит через MediatR. Pipeline behaviors виконують логування, вимірювання часу, валідацію та обробку винятків; Application визначає репозиторні інтерфейси, а Infrastructure реалізує їх через MongoDB.
+
+Домен зберігає відгук із вкладеними `author`, `comments` і `photos`, Value Objects `Author` та `Email`, інкапсульованим станом і версією для оптимістичної конкурентності. BSON-правила налаштовуються в Infrastructure через `BsonClassMap`; створюються індекси `{ eventPublicId: 1, createdAt: -1 }`, текстовий індекс відгуків і унікальні індекси `{ eventPublicId, userPublicId }` та `ticketPublicId`. Під час старту сервіс створює індекси й додає два демонстраційні відгуки лише коли колекція порожня.
+
+Запустіть `Platform.AppHost` за інструкціями вище: Aspire підійме PostgreSQL і MongoDB, автоматично передасть connection strings, а Reviews API застосує власні індекси й seed. Для окремого запуску задайте `MongoDb:ConnectionString` та `MongoDb:DatabaseName` у конфігурації. MongoDB health check: `GET /health`; Swagger доступний на `/swagger` у Development.
+
+Основні маршрути: `GET /api/reviews?eventPublicId=&search=&page=1&pageSize=20`, `GET /api/reviews/{objectId}`, `POST /api/reviews`, `PUT /api/reviews/{objectId}`, `DELETE /api/reviews/{objectId}?expectedVersion=1`. Створення приймає `eventPublicId`, `eventTitleSnapshot`, `ticketPublicId`, `userPublicId`, `displayName`, необов'язкові `avatarUrl`/`authorEmail`, `rating` (1–5), `text` і `photos`. Оновлення та видалення вимагають `expectedVersion`; конкурентна зміна повертає 409. Один користувач може створити лише один відгук на подію. Помилки валідації повертаються як `400 ValidationProblemDetails`, відсутність — `404 ProblemDetails`, конфлікт — `409 ProblemDetails`, недоступна MongoDB — `503 ProblemDetails`.
+
+Для AutoMapper 16 передайте Community license key через `AutoMapper:LicenseKey` або змінну середовища `AUTOMAPPER_LICENSE_KEY`.

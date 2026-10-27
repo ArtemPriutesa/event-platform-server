@@ -11,11 +11,19 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" Version="9.5.2" />
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="9.5.2" />
+    <PackageReference Include="Aspire.Hosting.MongoDB" Version="9.5.2" />
     <PackageReference Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj" />
+    <ProjectReference Include="..\Services\Reviews\Reviews.Api\Reviews.Api.csproj" />
+<<<<<<< HEAD
+=======
+    <ProjectReference Include="..\Services\Ticketing\Ticketing.Api\Ticketing.Api.csproj" />
+    <ProjectReference Include="..\Services\Reviews\Reviews.Api\Reviews.Api.csproj" />
+>>>>>>> e5a0759 (feat(reviews): host API in Aspire and document setup)
   </ItemGroup>
 
 </Project>
+
