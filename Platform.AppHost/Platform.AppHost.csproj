@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk;Aspire.AppHost.Sdk/9.5.2">
+﻿<Project Sdk="Microsoft.NET.Sdk;Aspire.AppHost.Sdk/9.5.2">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAspireHost>true</IsAspireHost>
+    <UserSecretsId>30c1f260-4dfa-4093-8ca0-ff74b5a2e302</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,16 +20,8 @@
     <ProjectReference Include="..\Services\EventCatalog\EventCatalog.Api\EventCatalog.Api.csproj" />
     <ProjectReference Include="..\Services\Ticketing\Ticketing.Api\Ticketing.Api.csproj" />
     <ProjectReference Include="..\Services\Reviews\Reviews.Api\Reviews.Api.csproj" />
-<<<<<<< HEAD
-    <ProjectReference Include="..\Services\Ticketing\Ticketing.Api\Ticketing.Api.csproj" />
-=======
-    <ProjectReference Include="..\Services\Reviews\Reviews.Api\Reviews.Api.csproj" />
-<<<<<<< HEAD
-=======
-    <ProjectReference Include="..\Services\Ticketing\Ticketing.Api\Ticketing.Api.csproj" />
-    <ProjectReference Include="..\Services\Reviews\Reviews.Api\Reviews.Api.csproj" />
->>>>>>> e5a0759 (feat(reviews): host API in Aspire and document setup)
->>>>>>> lab4
+    <ProjectReference Include="..\Services\ApiGateway\ApiGateway.csproj" />
+    <ProjectReference Include="..\Services\Aggregator\Aggregator.csproj" />
   </ItemGroup>
 
 </Project>
