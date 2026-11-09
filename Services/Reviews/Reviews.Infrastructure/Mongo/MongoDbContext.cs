@@ -3,6 +3,7 @@ using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Conventions;
 using MongoDB.Driver;
+using MongoDB.Driver.Core.Extensions.DiagnosticSources;
 using Reviews.Domain.Entities;
 using Reviews.Domain.ValueObjects;
 
@@ -19,6 +20,7 @@ public sealed class MongoDbContext
     {
         RegisterMappings();
         var settings = MongoClientSettings.FromConnectionString(options.Value.ConnectionString);
+        settings.ClusterConfigurator = cluster => cluster.Subscribe(new DiagnosticsActivityEventSubscriber());
         settings.ServerSelectionTimeout = TimeSpan.FromSeconds(5);
         settings.MaxConnectionPoolSize = 100;
         Database = new MongoClient(settings).GetDatabase(options.Value.DatabaseName);
@@ -61,9 +63,7 @@ public sealed class MongoDbContext
             {
                 map.AutoMap();
                 map.UnmapMember(x => x.Comments);
-                map.UnmapMember(x => x.Photos);
                 map.MapField("_comments").SetElementName("comments");
-                map.MapField("_photos").SetElementName("photos");
             });
             _mappingsRegistered = true;
         }

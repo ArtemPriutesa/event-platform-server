@@ -1,5 +1,6 @@
 using Reviews.Domain.Exceptions;
 using Reviews.Domain.ValueObjects;
+using MongoDB.Bson.Serialization.Attributes;
 
 namespace Reviews.Domain.Entities;
 
@@ -19,6 +20,7 @@ public sealed class Review : BaseEntity
     public IReadOnlyCollection<ReviewComment> Comments => _comments.AsReadOnly();
     public string? DiscussionId { get; private set; }
 
+    [BsonConstructor]
     private Review() { }
 
     public Review(string eventPublicId, string eventTitleSnapshot, string ticketPublicId,
