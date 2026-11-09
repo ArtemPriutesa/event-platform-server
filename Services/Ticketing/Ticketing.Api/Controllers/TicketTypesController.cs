@@ -2,12 +2,13 @@ using FluentValidation;
 using Ticketing.Bll.Contracts;
 using Ticketing.Bll.Services;
 using Microsoft.AspNetCore.Mvc;
+using Platform.ServiceDefaults.Caching;
 
 namespace Ticketing.Api.Controllers;
 
 [ApiController]
 [Route("api/ticket-types")]
-public sealed class TicketTypesController(ITicketingService ticketingService) : ControllerBase
+public sealed class TicketTypesController(ITicketingService ticketingService, IHybridCache cache) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType<PagedResult<TicketTypeResponse>>(StatusCodes.Status200OK)]
@@ -23,14 +24,23 @@ public sealed class TicketTypesController(ITicketingService ticketingService) : 
             return ValidationProblem(new ValidationProblemDetails(ToValidationDictionary(validation)));
         }
 
-        return Ok(await ticketingService.GetTicketTypesAsync(query, cancellationToken));
+        var isDefaultQuery = query.Page == 1 && query.PageSize == 20 && query.EventPublicId is null
+            && string.IsNullOrWhiteSpace(query.Search) && query.MinPrice is null && query.MaxPrice is null
+            && string.Equals(query.SortBy, "name", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(query.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
+        var result = isDefaultQuery
+            ? await cache.GetOrCreateAsync("catalog:products:list",
+                token => ticketingService.GetTicketTypesAsync(query, token), cancellationToken: cancellationToken)
+            : await ticketingService.GetTicketTypesAsync(query, cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet("{id:long}")]
     [ProducesResponseType<TicketTypeResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<TicketTypeResponse>> GetById(long id, CancellationToken cancellationToken)
-        => Ok(await ticketingService.GetTicketTypeAsync(id, cancellationToken));
+        => Ok(await cache.GetOrCreateAsync($"catalog:product:{id}",
+            token => ticketingService.GetTicketTypeAsync(id, token), cancellationToken: cancellationToken));
 
     [HttpPost]
     [ProducesResponseType<TicketTypeResponse>(StatusCodes.Status201Created)]
@@ -48,6 +58,7 @@ public sealed class TicketTypesController(ITicketingService ticketingService) : 
         }
 
         var created = await ticketingService.CreateTicketTypeAsync(request, cancellationToken);
+        await cache.RemoveAsync("catalog:products:list", "ticket type created", cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -68,6 +79,8 @@ public sealed class TicketTypesController(ITicketingService ticketingService) : 
         }
 
         await ticketingService.ChangeTicketTypePriceAsync(id, request.Price, cancellationToken);
+        await cache.RemoveAsync($"catalog:product:{id}", "ticket type price changed", cancellationToken);
+        await cache.RemoveAsync("catalog:products:list", "ticket type price changed", cancellationToken);
         return NoContent();
     }
 

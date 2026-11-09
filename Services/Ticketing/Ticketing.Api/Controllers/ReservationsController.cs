@@ -2,12 +2,13 @@ using FluentValidation;
 using Ticketing.Bll.Contracts;
 using Ticketing.Bll.Services;
 using Microsoft.AspNetCore.Mvc;
+using Platform.ServiceDefaults.Caching;
 
 namespace Ticketing.Api.Controllers;
 
 [ApiController]
 [Route("api/reservations")]
-public sealed class ReservationsController(ITicketingService ticketingService) : ControllerBase
+public sealed class ReservationsController(ITicketingService ticketingService, IHybridCache cache) : ControllerBase
 {
     [HttpPost]
     [ProducesResponseType<ReservationResponse>(StatusCodes.Status201Created)]
@@ -29,6 +30,7 @@ public sealed class ReservationsController(ITicketingService ticketingService) :
         }
 
         var created = await ticketingService.CreateReservationAsync(request, cancellationToken);
+        await InvalidateProductsAsync(created.Items.Select(item => item.TicketTypeId), "reservation created", cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -58,7 +60,9 @@ public sealed class ReservationsController(ITicketingService ticketingService) :
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Confirm(long id, CancellationToken cancellationToken)
     {
+        var reservation = await ticketingService.GetReservationAsync(id, cancellationToken);
         await ticketingService.ConfirmReservationAsync(id, cancellationToken);
+        await InvalidateProductsAsync(reservation.Items.Select(item => item.TicketTypeId), "reservation confirmed", cancellationToken);
         return NoContent();
     }
 
@@ -68,7 +72,15 @@ public sealed class ReservationsController(ITicketingService ticketingService) :
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Cancel(long id, CancellationToken cancellationToken)
     {
+        var reservation = await ticketingService.GetReservationAsync(id, cancellationToken);
         await ticketingService.CancelReservationAsync(id, cancellationToken);
+        await InvalidateProductsAsync(reservation.Items.Select(item => item.TicketTypeId), "reservation cancelled", cancellationToken);
         return NoContent();
+    }
+
+    private async Task InvalidateProductsAsync(IEnumerable<long> ticketTypeIds, string reason, CancellationToken cancellationToken)
+    {
+        foreach (var id in ticketTypeIds.Distinct())
+            await cache.RemoveAsync($"catalog:product:{id}", reason, cancellationToken);
     }
 }

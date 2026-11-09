@@ -57,7 +57,7 @@ Remove-Variable postgresPassword, mongoPassword
 dotnet run --project Platform.AppHost\Platform.AppHost.csproj --launch-profile http
 ```
 
-Aspire AppHost створює PostgreSQL і MongoDB з постійними volumes, передає connection strings API та очікує готовності баз. Для Лабораторної №5 використовуються volumes `event-platform-laba5-postgres-data` і `event-platform-laba5-mongo-data`; старі volumes не видаляються. Паролі стабільно зберігаються в user secrets AppHost; не змінюйте їх, доки використовуються відповідні volumes. Ticketing застосовує EF Core міграції при запуску. Для Event Catalog треба окремо застосувати SQL-скрипти з розділу [ініціалізації баз](#ініціалізація-баз-даних). URL API, журнали та фактичні порти доступні в Aspire Dashboard.
+Aspire AppHost створює PostgreSQL, MongoDB і Redis з постійними volumes, передає connection strings API та очікує готовності ресурсів. Для Лабораторної №6 використовуються volumes `event-platform-laba6-postgres-data`, `event-platform-laba6-mongo-data` і `event-platform-laba6-redis-data`; volumes попередніх лабораторних не змінюються. Паролі стабільно зберігаються в user secrets AppHost; не змінюйте їх, доки використовуються відповідні volumes. Ticketing застосовує EF Core міграції при запуску. Для Event Catalog треба окремо застосувати SQL-скрипти з розділу [ініціалізації баз](#ініціалізація-баз-даних). URL API, журнали та фактичні порти доступні в Aspire Dashboard.
 
 ## Ініціалізація баз даних
 
@@ -200,12 +200,14 @@ Reviews використовує Clean Architecture: контролери пер
 
 - `Platform.AppHost` — Aspire AppHost.
 - `Services\EventCatalog`, `Services\Ticketing`, `Services\Reviews` — сервіси.
+- `Services\<Service>\<Service>.Api\Protos` — gRPC контракти серверів; `Platform.Aggregator\Protos` — клієнтські контракти.
+- `Platform.ServiceDefaults\Caching` — спільний L1/L2 cache-aside та метрики кешу.
 - `db\p1`, `db\p2`, `db\p3` — SQL/JavaScript схеми, seed і приклади документів.
 - `docs\event-service-erd.drawio`, `docs\ticketing-service-erd.drawio`, `docs\payment-service-erd.drawio` — ERD-діаграми. Відкрийте їх у [diagrams.net](https://app.diagrams.net/). ERD Payments & Feedback показує цільову модель і не означає, що відповідні API вже реалізовані.
 
 ## Лабораторна №5: Aspire, Gateway та Aggregator
 
-`Platform.AppHost` оркеструє PostgreSQL, MongoDB, три API, `Aggregator` і `ApiGateway`. Бази запускаються перед API; Aggregator чекає на Orders і Reviews, Gateway — на всі сервіси. Gateway слухає фіксований порт `5000`.
+`Platform.AppHost` оркеструє PostgreSQL, MongoDB, Redis, три API, `Aggregator` і `ApiGateway`. Інфраструктурні ресурси запускаються перед API; Aggregator чекає на Orders і Reviews, Gateway — на всі сервіси. Gateway слухає фіксований порт `5000`.
 
 ### Запити через Gateway
 
@@ -215,11 +217,14 @@ Reviews використовує Clean Architecture: контролери пер
 | `GET /api/orders/reservations/{id}` | Проксі до Ticketing (`/api/reservations/{id}`) |
 | `GET /api/reviews?eventPublicId=...` | Проксі до Reviews |
 | `GET /api/aggregator/orders/{id}/full` | Бронювання, відповідні події та відгуки з частковою відповіддю |
+| `GET /api/aggregator/grpc/{reservationId}/{eventId}/{eventPublicId}` | Паралельний запит до трьох gRPC сервісів із частковою відповіддю |
 
 YARP використовує логічні імена Aspire для пошуку адрес сервісів. Gateway приймає або генерує `X-Correlation-Id`, повертає його у відповіді та передає далі. Трасування окремо зберігає W3C TraceId. Серверні логи містять метод, шлях, маршрут, статус, тривалість і IP клієнта; недоступний upstream повертає помилку Gateway і записується як попередження.
 
 Aggregator паралельно отримує каталог і відгуки для подій у бронюванні. Недоступний сервіс додає елемент у `Warnings`, доступні дані повертаються зі статусом `200`. Поля з `null` не серіалізуються. Клієнтські HTTP виклики мають тайм-аут 4 секунди й автоматично передають correlation ID.
 
-`Platform.ServiceDefaults` задає service discovery, OpenTelemetry для ASP.NET Core, HttpClient, Npgsql/SQL і MongoDB, а також компактні структуровані Serilog логи в консоль і Aspire Dashboard через OTLP. `/health` перевіряє доступність відповідної бази, `/alive` — liveness процесу.
+`Platform.ServiceDefaults` задає service discovery, спільний Redis distributed cache та in-memory кеш L1, OpenTelemetry для ASP.NET Core, HttpClient, Npgsql/SQL і MongoDB, а також компактні структуровані Serilog логи в консоль і Aspire Dashboard через OTLP. Cache-aside використовує 30-секундний L1 і 2-хвилинний Redis L2; зміни подій і квитків видаляють відповідні ключі після запису з журналюванням причини. Метрики `cache.hits` (з рівнем L1/L2) та `cache.misses` доступні через Meter `EventPlatform.Caching`. `/health` перевіряє доступність відповідної бази, `/alive` — liveness процесу.
+
+Контракти `catalog.proto`, `ticketing.proto` і `reviews.proto` лежать у `Protos` відповідних API та згенеровані як серверні контракти; копії клієнтів розміщені в `Platform.Aggregator/Protos`. Кожен сервіс публікує відповідний gRPC adapter, а Aggregator реєструє типізовані клієнти через Aspire service discovery. Для перевірки інфраструктури кешу перегляньте Redis у Dashboard та повторіть `GET /api/ticket-types/{id}` або `GET /api/events/{id}`: другий запит має збільшити cache hit. Записи у відповідні API очищують кеш.
 
 Для ручної перевірки запустіть AppHost командою з розділу «Швидкий запуск», переконайтеся в Dashboard, що всі ресурси `Running`, і викличте наведені вище маршрути через `http://localhost:5000`. Для трасування агрегованого запиту використовуйте `GET /api/aggregator/orders/{id}/full`; зупинка одного upstream має повертати доступну частину відповіді з попередженням.

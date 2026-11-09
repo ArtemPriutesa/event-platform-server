@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Platform.ServiceDefaults.Caching;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
@@ -19,6 +20,11 @@ public static class Extensions
         builder.Services.AddSingleton(new System.Diagnostics.ActivitySource(builder.Environment.ApplicationName));
         builder.Services.AddServiceDiscovery();
         builder.Services.AddHealthChecks();
+        builder.AddRedisDistributedCache("redis");
+        builder.Services.AddMemoryCache(options => options.SizeLimit = 10_000);
+        builder.Services.AddSingleton<CacheTelemetry>();
+        builder.Services.AddSingleton<IHybridCache, HybridCache>();
+        builder.Services.AddSingleton<GrpcLoggingInterceptor>();
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddTransient<CorrelationIdHandler>();
         builder.Services.ConfigureHttpClientDefaults(http => http
@@ -78,7 +84,8 @@ public static class Extensions
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
-                .AddRuntimeInstrumentation())
+                .AddRuntimeInstrumentation()
+                .AddMeter(CacheTelemetry.MeterName))
             .WithTracing(tracing => tracing
                 .AddSource(builder.Environment.ApplicationName)
                 .AddAspNetCoreInstrumentation(options => options.RecordException = true)
