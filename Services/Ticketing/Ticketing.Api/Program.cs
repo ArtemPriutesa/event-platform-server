@@ -13,20 +13,17 @@ using Ticketing.Dal.Repositories;
 using Ticketing.Dal.UnitOfWork;
 using Ticketing.Domain.Entities;
 using Ticketing.Domain.Exceptions;
+using Platform.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
+builder.Host.AddPlatformSerilog("orders-api");
 var connectionString = builder.Configuration.GetConnectionString("Ticketing");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     throw new InvalidOperationException(
         "Aspire did not provide the 'Ticketing' connection string. Start the service through Platform.AppHost.");
 }
-
-builder.Host.UseSerilog((context, loggerConfiguration) => loggerConfiguration
-    .ReadFrom.Configuration(context.Configuration)
-    .Enrich.FromLogContext()
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Information)
-    .WriteTo.Console());
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -55,23 +52,7 @@ builder.Services.AddAutoMapper(configuration =>
 
 var app = builder.Build();
 app.Services.GetRequiredService<AutoMapper.IConfigurationProvider>().AssertConfigurationIsValid();
-app.Use(async (context, next) =>
-{
-    using (LogContext.PushProperty("CorrelationId", context.TraceIdentifier))
-    {
-        var userId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (userId is null)
-        {
-            await next();
-            return;
-        }
-
-        using (LogContext.PushProperty("UserId", userId))
-        {
-            await next();
-        }
-    }
-});
+app.UsePlatformRequestContext();
 app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
 
@@ -99,6 +80,7 @@ app.MapGet("/health", async (TicketingDbContext context, CancellationToken cance
         ? Results.Ok(new { status = "healthy", database = "connected" })
         : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Database unavailable");
 }).WithName("TicketingDatabaseHealth");
+app.MapHealthChecks("/alive");
 
 app.Run();
 

@@ -2,8 +2,12 @@ using Reviews.Api;
 using Reviews.Application;
 using Reviews.Infrastructure;
 using Reviews.Infrastructure.Mongo;
+using Platform.ServiceDefaults;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
+builder.Host.AddPlatformSerilog("reviews-api");
 var connectionString = builder.Configuration.GetConnectionString("Reviews")
     ?? builder.Configuration[$"{MongoDbOptions.SectionName}:ConnectionString"];
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -19,7 +23,9 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 app.Services.GetRequiredService<AutoMapper.IConfigurationProvider>().AssertConfigurationIsValid();
+app.UsePlatformRequestContext();
 app.UseExceptionHandler();
+app.UseSerilogRequestLogging();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -32,6 +38,7 @@ app.MapGet("/health", async (MongoDbContext context, CancellationToken cancellat
         cancellationToken: cancellationToken);
     return Results.Ok(new { status = "healthy", database = "connected" });
 }).WithName("MongoDatabaseHealth");
+app.MapHealthChecks("/alive");
 app.Run();
 
 public partial class Program;
