@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using System.Reflection;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Conventions;
@@ -47,6 +48,9 @@ public sealed class MongoDbContext
             BsonClassMap.RegisterClassMap<Author>(map =>
             {
                 map.AutoMap();
+                var domainConstructor = typeof(Author).GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+                    .Single(constructor => constructor.GetParameters().Length == 3);
+                map.UnmapConstructor(domainConstructor);
                 map.MapCreator(x => new Author(x.DisplayName, x.AvatarUrl, x.Email == null ? null : x.Email.Value));
             });
             BsonClassMap.RegisterClassMap<Email>(map =>
@@ -62,6 +66,12 @@ public sealed class MongoDbContext
             BsonClassMap.RegisterClassMap<Review>(map =>
             {
                 map.AutoMap();
+                var domainConstructor = typeof(Review).GetConstructors(BindingFlags.Instance | BindingFlags.Public)
+                    .Single(constructor => constructor.GetParameters().Length == 9);
+                map.UnmapConstructor(domainConstructor);
+                var persistenceConstructor = typeof(Review).GetConstructor(
+                    BindingFlags.Instance | BindingFlags.NonPublic, null, Type.EmptyTypes, null)!;
+                map.MapConstructor(persistenceConstructor);
                 map.UnmapMember(x => x.Comments);
                 map.MapField("_comments").SetElementName("comments");
             });
