@@ -4,6 +4,7 @@ using Reviews.Infrastructure;
 using Reviews.Infrastructure.Mongo;
 using Platform.ServiceDefaults;
 using Serilog;
+using Reviews.Api.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
@@ -14,6 +15,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Configure MongoDb:ConnectionString or start the service through Platform.AppHost.");
 
 builder.Services.AddControllers();
+builder.Services.AddGrpc(options => options.Interceptors.Add<GrpcLoggingInterceptor>());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
@@ -32,6 +34,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 app.MapControllers();
+app.MapGrpcService<ReviewsGrpcService>();
 app.MapGet("/health", async (MongoDbContext context, CancellationToken cancellationToken) =>
 {
     await context.Database.RunCommandAsync<MongoDB.Bson.BsonDocument>(new MongoDB.Bson.BsonDocument("ping", 1),

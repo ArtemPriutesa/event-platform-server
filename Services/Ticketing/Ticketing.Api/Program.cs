@@ -14,6 +14,7 @@ using Ticketing.Dal.UnitOfWork;
 using Ticketing.Domain.Entities;
 using Ticketing.Domain.Exceptions;
 using Platform.ServiceDefaults;
+using Ticketing.Api.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
@@ -28,6 +29,7 @@ if (string.IsNullOrWhiteSpace(connectionString))
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+builder.Services.AddGrpc(options => options.Interceptors.Add<GrpcLoggingInterceptor>());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
@@ -73,6 +75,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapControllers();
+app.MapGrpcService<TicketingGrpcService>();
 app.MapGet("/health", async (TicketingDbContext context, CancellationToken cancellationToken) =>
 {
     var connected = await context.Database.CanConnectAsync(cancellationToken);

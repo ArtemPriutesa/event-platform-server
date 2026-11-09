@@ -9,12 +9,14 @@ using Npgsql;
 using Dapper;
 using Platform.ServiceDefaults;
 using Serilog;
+using EventCatalog.Api.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddServiceDefaults();
 builder.Host.AddPlatformSerilog("catalog-api");
 
 builder.Services.AddControllers();
+builder.Services.AddGrpc(options => options.Interceptors.Add<GrpcLoggingInterceptor>());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -51,6 +53,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<CatalogGrpcService>();
 
 app.MapGet("/health", async (NpgsqlDataSource dataSource, CancellationToken cancellationToken) =>
 {

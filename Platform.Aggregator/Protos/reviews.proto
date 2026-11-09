@@ -1,0 +1,13 @@
+syntax = "proto3";
+option csharp_namespace = "Platform.Contracts";
+package platform.v1;
+service ReviewsGrpc { rpc GetReviewsForEvent (GetReviewsRequest) returns (ReviewsReply); }
+message GetReviewsRequest { string event_public_id = 1; }
+message ReviewsReply { repeated ReviewReply reviews = 1; }
+message ReviewReply {
+  string id = 1;
+  string event_public_id = 2;
+  string author = 3;
+  int32 rating = 4;
+  string text = 5;
+}

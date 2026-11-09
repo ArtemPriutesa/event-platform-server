@@ -1,0 +1,18 @@
+syntax = "proto3";
+option csharp_namespace = "Platform.Contracts";
+package platform.v1;
+service TicketingGrpc { rpc GetReservation (GetReservationRequest) returns (ReservationReply); }
+message GetReservationRequest { int64 id = 1; }
+message ReservationReply {
+  int64 id = 1;
+  string public_id = 2;
+  string user_public_id = 3;
+  string status = 4;
+  repeated ReservationLine items = 5;
+}
+message ReservationLine {
+  string event_public_id = 1;
+  string event_title = 2;
+  string ticket_type = 3;
+  int32 quantity = 4;
+}

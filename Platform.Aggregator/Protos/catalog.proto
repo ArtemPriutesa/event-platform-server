@@ -1,0 +1,13 @@
+syntax = "proto3";
+option csharp_namespace = "Platform.Contracts";
+package platform.v1;
+service CatalogGrpc { rpc GetEvent (GetEventRequest) returns (EventReply); }
+message GetEventRequest { int64 id = 1; }
+message EventReply {
+  int64 id = 1;
+  string public_id = 2;
+  string title = 3;
+  string status = 4;
+  string starts_at = 5;
+  string ends_at = 6;
+}
