@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -39,11 +39,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Reviews.Infrastructure", "S
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Reviews.Api", "Services\Reviews\Reviews.Api\Reviews.Api.csproj", "{7AE27FD7-ECF7-4E9F-B3B2-AAC6C617D3CD}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiGateway", "Services\ApiGateway\ApiGateway.csproj", "{1CFA120C-2CC1-4715-BC89-F30ACD89A933}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ApiGateway", "Platform.ApiGateway\ApiGateway.csproj", "{1CFA120C-2CC1-4715-BC89-F30ACD89A933}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Platform.ServiceDefaults", "Platform.ServiceDefaults\Platform.ServiceDefaults.csproj", "{EBF47941-E086-4013-AB61-10CFF0207F1C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aggregator", "Services\Aggregator\Aggregator.csproj", "{9A799235-6C9B-467D-9D19-3C291E4AFED6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aggregator", "Platform.Aggregator\Aggregator.csproj", "{9A799235-6C9B-467D-9D19-3C291E4AFED6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
