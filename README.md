@@ -1,118 +1,133 @@
 # Event Platform
 
-Мікросервісна платформа для організаторів, відвідувачів і контролерів подій. Організатори публікують заходи, відвідувачі бронюють і оплачують квитки, а після події залишають відгуки; контролери перевіряють квитки під час входу.
+Мікросервісна платформа для організаторів подій і відвідувачів. Event Catalog керує подіями, Ticketing — квитками й бронюваннями, Reviews — відгуками. Payments, Notifications і Discussions описані як цільові контексти, але їх окремі API поки не реалізовані.
 
+## Зміст
 
-## Контексти та бази даних
+- [Архітектура та дані](#архітектура-та-дані)
+- [Швидкий запуск](#швидкий-запуск)
+- [Ініціалізація баз даних](#ініціалізація-баз-даних)
+- [Перевірка стану та тести](#перевірка-стану-та-тести)
+- [Event Catalog API](#event-catalog-api)
+- [Ticketing API](#ticketing-api)
+- [Reviews API](#reviews-api)
+- [Конфігурація та відновлення](#конфігурація-та-відновлення)
+- [Структура репозиторію та ERD](#структура-репозиторію-та-erd)
 
-| Проєкт | Bounded context | Власні сутності | Персистентність |
-|---|---|---|---|
-| №1 | Event Catalog | Organizer, Category, Event, EventVenue, Tag, EventTag | PostgreSQL; Npgsql + процедурний доступ для ADO.NET/Dapper |
-| №2 | Ticketing | TicketType, Reservation, ReservationDetails, ReservationItem, Ticket | PostgreSQL; тришаровий ASP.NET Core сервіс, EF Core Code First / Fluent API |
-| №3 | Payments & Feedback | payments, notifications, reviews, discussions | MongoDB; агрегати документів |
+## Архітектура та дані
 
-Кожна БД має окремого власника даних. Спільних таблиць і foreign key між базами немає. UUID `PublicId` є міжсервісним ідентифікатором; споживачі зберігають його як зовнішнє посилання, а не як FK. Опис агрегатів і узгодженості даних наведено в [документації меж контекстів](docs/bounded-contexts.md).
+| Сервіс / контекст | Агрегати | База даних та реалізація |
+|---|---|---|
+| Event Catalog | `Organizer`, `Category`, `Event` із `EventVenue` та `EventTag` | PostgreSQL; Domain, BLL, DAL, API; DAL використовує ADO.NET/Dapper, спільну сесію й Unit of Work |
+| Ticketing | `TicketType`, `Reservation` із `ReservationDetails` і `ReservationItems`, `Ticket` | PostgreSQL; тришаровий ASP.NET Core та EF Core Code First |
+| Reviews | `Review` із вкладеними автором, коментарями й фото | MongoDB; Api, Application, Domain, Infrastructure, MediatR |
+| Цільові контексти | `Payment`, `Notification`, `Discussion` | Описані в моделі предметної області; реалізацій цих API немає |
 
-## Політика копіювання даних
+Кожна база має одного власника даних. Спільних таблиць і SQL foreign keys між базами немає. UUID `PublicId` є міжсервісним ідентифікатором, а не зовнішнім ключем БД. Для інтеграційних подій потрібні ідемпотентні обробники; transactional outbox рекомендований для надійної доставки, але брокер повідомлень у рішенні не налаштований.
 
-| Поле | Де зберігається | Джерело істини | Політика узгодженості |
-|---|---|---|---|
-| `Event.PublicId`, `Event.Title` | Event Catalog; копія назви у Ticketing і Payments/Feedback | Event Catalog | `PublicId` незмінний. Поточну назву в `TicketTypes.EventTitleSnapshot` оновлювати подією `EventUpdated`; назви в бронюванні, платежі й відгуку — незмінні знімки на момент операції. |
-| `EventPublicId` | Ticketing `TicketTypes` та `ReservationItems`, MongoDB `reviews`/`payments` | Event Catalog | Тільки посилання UUID без FK; споживачі отримують факт публікації події асинхронною інтеграційною подією. |
-| `TicketType.Name`, `TicketType.Price` | Ticketing; `ReservationItems.TicketTypeNameSnapshot`, `UnitPrice` | Ticketing | Знімок назви й ціни фіксується при створенні бронювання і не змінюється після зміни тарифу. |
-| `Reservation.PublicId` | Ticketing і MongoDB `payments` | Ticketing | UUID передається при створенні платежу; унікальний індекс у MongoDB запобігає кільком платіжним агрегатам для одного бронювання. Статус платежу не є джерелом статусу бронювання. |
-| `ReservationItems.UnitPrice × Quantity`, валюта | MongoDB `payments.amount`, `payments.currency` | Ticketing | Сума платежу — незмінний знімок суми підтвердженого бронювання; повернення записується окремим статусом/часом у платіжному агрегаті. |
-| `Ticket.PublicId` | Ticketing і MongoDB `reviews` | Ticketing | Відгук містить UUID придбаного квитка як зовнішнє посилання; Ticketing підтверджує його валідність перед прийняттям відгуку. |
-| `UserPublicId` | Ticketing і MongoDB | Сервіс ідентифікації/акаунтів (поза цими трьома БД) | Зберігається як зовнішній UUID без FK; ім’я автора в документах відгуку/обговорення — знімок для стабільного відображення. |
-| `author.displayName` | MongoDB `reviews.author`, `discussions.author` | Профіль користувача / організатора | Знімок імені на момент публікації; зміна профілю не переписує історичні відгуки й повідомлення. |
-| Назва події у сповіщенні | MongoDB `notifications.event.title` | Event Catalog | Вбудований знімок на момент надсилання сповіщення; історичні сповіщення не переписуються. |
+### Правила копіювання даних
 
-### Ідентифікатори, аудит та конкурентність
+| Дані | Джерело істини та копії | Правило |
+|---|---|---|
+| `Event.PublicId` | Event Catalog; посилання в Ticketing і Reviews | UUID незмінний; використовується без FK між базами. |
+| Назва події | Event Catalog; знімок у `TicketType.EventTitleSnapshot`, бронюванні й відгуку | Назву в типі квитка можна оновлювати після інтеграційної події; історичні знімки не переписуються. |
+| `TicketType.Name`, `TicketType.Price` | Ticketing; знімки в `ReservationItems` | Фіксуються під час бронювання й не змінюються після редагування типу квитка. |
+| `Reservation.PublicId` і сума | Ticketing; запланована копія в Payments | Платіж зберігає знімок суми підтвердженого бронювання; статус платежу не є джерелом статусу бронювання. Payments API ще немає. |
+| `Ticket.PublicId` | Ticketing; посилання у Reviews | Reviews зберігає UUID. Перевірка квитка через Ticketing потребує інтеграції. |
+| `UserPublicId`, `author.displayName` | Зовнішній сервіс профілів; посилання/знімок у Ticketing і Reviews | Ім’я автора в опублікованому відгуку зберігається як історичний знімок. |
+| Назва події у сповіщенні | Event Catalog; майбутній знімок у Notifications | Зберігати назву на момент надсилання; Notifications API ще немає. |
 
-SQL-таблиці використовують `BIGINT GENERATED ALWAYS AS IDENTITY` для локальних первинних ключів: вони компактні й ефективні для локальних вставок та індексів. Події, бронювання й квитки додатково мають UUID `PublicId` для безпечного обміну ідентифікаторами між незалежними базами; MongoDB використовує стабільні string `_id` у seed-прикладах та UUID-рядки для зовнішніх посилань. SQL-сутності містять `created_at`, `created_by`, `updated_at`, `updated_by`, `is_deleted` і `version` для аудиту, м’якого видалення та оптимістичної конкурентності. `version` є прикладним токеном: оновлення має збільшувати його умовою `WHERE version = :expected_version` та перевіряти кількість змінених рядків.
+SQL-таблиці використовують локальні `BIGINT GENERATED ALWAYS AS IDENTITY` ключі та UUID для міжсервісного обміну. У SQL-сутностях також є поля аудиту, м’якого видалення й `version`; умовне оновлення має перевіряти очікувану версію та кількість змінених рядків. MongoDB використовує ObjectId для `_id` відгуку й UUID-рядки як зовнішні посилання.
 
-## Розгортання локально
+## Швидкий запуск
 
-Для запуску сервісів і баз даних потрібен Docker. Запускайте API через Aspire AppHost: він створює ресурси PostgreSQL і автоматично передає кожному сервісу його connection string. Окремо налаштовувати підключення не потрібно.
+Потрібні .NET SDK 9 або новіший і Docker Desktop із запущеним Docker Engine. Перед першим запуском згенеруйте паролі та збережіть їх у user secrets AppHost (виконати один раз):
 
-### Aspire: запуск сервісів
+```powershell
+$postgresPassword = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$mongoPassword = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+dotnet user-secrets set Parameters:postgres-password $postgresPassword --project Platform.AppHost\Platform.AppHost.csproj
+dotnet user-secrets set Parameters:mongo-password $mongoPassword --project Platform.AppHost\Platform.AppHost.csproj
+Remove-Variable postgresPassword, mongoPassword
+```
 
-Запустіть API та PostgreSQL через AppHost. Aspire автоматично передає кожному сервісу його connection string:
+Потім із кореня репозиторію запустіть:
 
 ```powershell
 dotnet run --project Platform.AppHost\Platform.AppHost.csproj --launch-profile http
 ```
 
-### Короткий порядок запуску всіх БД
+Aspire AppHost створює PostgreSQL і MongoDB з постійними volumes, передає connection strings API та очікує готовності баз. Для Лабораторної №5 використовуються volumes `event-platform-laba5-postgres-data` і `event-platform-laba5-mongo-data`; старі volumes не видаляються. Паролі стабільно зберігаються в user secrets AppHost; не змінюйте їх, доки використовуються відповідні volumes. Ticketing застосовує EF Core міграції при запуску. Для Event Catalog треба окремо застосувати SQL-скрипти з розділу [ініціалізації баз](#ініціалізація-баз-даних). URL API, журнали та фактичні порти доступні в Aspire Dashboard.
 
-Виконуйте команди з кореня репозиторію саме в цьому порядку. Спочатку створюється Event Catalog, адже Ticketing використовує UUID демонстраційної події з першої БД.
+## Ініціалізація баз даних
+
+### Event Catalog: перше створення схеми
+
+Після запуску AppHost візьміть порт і параметри PostgreSQL з Aspire Dashboard. З кореня репозиторію виконайте:
 
 ```powershell
-# 1. Event Catalog: створити схему, процедури та початкові дані
-createdb event_catalog
-psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\schema.sql
-psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\procedures.sql
-psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\seed.sql
+$connection = "Host=localhost;Port=<порт>;Database=event_catalog;Username=<користувач>;Password=<пароль>"
+psql $connection -v ON_ERROR_STOP=1 -f db\p1\schema.sql
+psql $connection -v ON_ERROR_STOP=1 -f db\p1\procedures.sql
+psql $connection -v ON_ERROR_STOP=1 -f db\p1\seed.sql
+```
 
-# Необов’язкова перевірка переходу статусу події
-psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\verify.sql
+`schema.sql` не призначений для повторного застосування. `db\p1\verify.sql` містить необов’язкову перевірку переходу статусу події. Для PostgreSQL, запущеного окремо від Aspire, можна створити базу через `createdb event_catalog` і використовувати `psql -d event_catalog`.
 
-# 2. Ticketing
-# Aspire створює базу ticketing, EF Core застосовує міграції під час запуску API.
-# db\p2\seed.sql можна запускати окремо лише для самостійно створеної бази.
+### Ticketing
 
-# 3. Payments & Feedback: спочатку колекції та індекси, потім документи
+AppHost створює базу `ticketing`, а Ticketing API застосовує EF Core міграції при старті. Не застосовуйте `db\p2\schema.sql` до цієї бази перед міграціями. `db\p2\seed.sql` — приклад окремого seed для самостійно створеної бази. У Development після міграцій додається ідемпотентний демонстраційний тип квитка.
+
+### MongoDB / Reviews
+
+Під час запуску Reviews створює індекси й додає два демонстраційні відгуки, лише якщо колекція порожня. Для окремої ручної ініціалізації з кореня репозиторію:
+
+```powershell
 mongosh "mongodb://localhost:27017/event_platform_payments" --file db\p3\collections.js
 mongosh "mongodb://localhost:27017/event_platform_payments" --file db\p3\seed.js
 ```
 
-Не запускайте повторно `schema.sql` у вже створених БД: ці файли створюють таблиці й не призначені для повторного застосування. Для Ticketing схему створюють EF Core міграції; не застосовуйте до цієї БД `db\p2\schema.sql` перед міграцією. Seed-скрипти можна запускати повторно.
+Seed-скрипти MongoDB можна запускати повторно. Приклади документів наведені в `db\p3\examples.json`.
 
-## Примітки
+## Перевірка стану та тести
 
-- Порядок запуску всіх трьох баз наведено вище. Seed-файли можна запускати повторно; `schema.sql` — ні.
-- Event Catalog має процедури CRUD і перевірений перехід статусів; перевірка: `psql -v ON_ERROR_STOP=1 -d event_catalog -f db\p1\verify.sql`.
-- Ticketing містить п’ять сутностей для EF Core; використовуйте провайдер `Npgsql.EntityFrameworkCore.PostgreSQL`.
-- MongoDB має колекції `payments`, `notifications`, `reviews` і `discussions`. Приклади документів: [examples.json](db/p3/examples.json).
-- ERD: [Event Catalog](docs/event-service-erd.drawio) · [Ticketing](docs/ticketing-service-erd.drawio) · [Payments & Feedback](docs/payment-service-erd.drawio). Відкрийте файли на [draw.io](https://app.diagrams.net/).
-- Для перевірки індексів PostgreSQL виконайте `SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public';`. FK між базами відсутні.
+Знайдіть URL API в Aspire Dashboard і викличте `GET /health`. Успішна відповідь має `status: healthy` і `database: connected`.
 
-## Лабораторна 2: ASP.NET Core / тришаровий сервіс Event Catalog
+| Endpoint | Перевірка |
+|---|---|
+| Event Catalog `GET /health` | PostgreSQL-з’єднання та запит `SELECT 1` |
+| Ticketing `GET /health` | Доступність PostgreSQL через EF Core |
+| Reviews `GET /health` | MongoDB-команда `ping` |
 
-Сервіс Event Catalog поділений на Domain, BLL, DAL та API. DAL надає generic repository contracts, ADO.NET і Dapper-репозиторії; усі scoped репозиторії в одному запиті використовують спільне з’єднання й транзакцію через Unit of Work. Для подій застосовано параметризований Dapper із базовим `BaseDapperRepository<T>`, а мапінг API DTO налаштовано профілем AutoMapper. Схема та процедури PostgreSQL знаходяться в `db\p1`.
+Swagger кожного API доступний за `/swagger` у середовищі Development.
 
-### Aspire, база даних і конфігурація підключення
-
-AppHost запускає PostgreSQL із persistent data volume та EventCatalog API; Aspire передає API connection string через `WithReference`. Потрібен запущений Docker. Після першого старту AppHost застосуйте таблиці, процедури й початкові дані до БД (порт і параметри підключення подивіться в Aspire Dashboard):
+Для локальної автоматизованої перевірки:
 
 ```powershell
-psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\schema.sql
-psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\procedures.sql
-psql "Host=localhost;Port=<порт з Aspire Dashboard>;Database=event_catalog;Username=<користувач>;Password=<пароль>" -v ON_ERROR_STOP=1 -f db\p1\seed.sql
+dotnet build Platform.sln
+dotnet test Platform.sln
 ```
 
-### Ticketing API (EF Core)
+У рішенні є тестовий проєкт `Services\Ticketing\Ticketing.Tests`. Перевірка API з базами потребує запущених контейнерів і підготовленої схеми Event Catalog.
 
-Aspire запускає окрему базу `ticketing` і сервіс `Ticketing.Api`, передає connection string, а міграції застосовуються автоматично при старті. У Ticketing немає статичних довідникових сутностей зі стабільними ID, тому `HasData` тут недоречний: типи квитків залежать від подій і є транзакційними даними. Для демонстрації в Development після міграцій додається ідемпотентний тип квитка. Swagger доступний на `/swagger`, перевірка БД — на `/health`. Для генерації SQL-скрипту міграції виконайте:
+## Event Catalog API
 
-```powershell
-dotnet ef migrations script --idempotent --project Services\Ticketing\Ticketing.Dal --startup-project Services\Ticketing\Ticketing.Api --output db\p2\migrations.sql
-```
+Сервіс керує подіями, категоріями, організаторами й тегами. Ідентифікатор `{id}` у маршрутах — локальний числовий ID сервісу; між сервісами використовується `PublicId`.
 
-Список квитків підтримує SQL-фільтрацію та пагінацію, наприклад `GET /api/ticket-types?page=1&pageSize=10&search=standard&sortBy=price&sortDir=asc`. Бронювання утримує кількість квитків у транзакції на 15 хвилин; його можна підтвердити для випуску квитків або скасувати для звільнення резерву. `GET /api/reservations/{id}` демонструє eager loading, `/explicit` — explicit loading, а `/ticket-types` — LINQ-запит через проміжну сутність `reservation_items`.
+| Метод і шлях | Призначення |
+|---|---|
+| `GET /api/events?search=&status=&categoryId=` | Пошук і фільтрація подій |
+| `GET /api/events/{id}` | Деталі події, місце проведення та теги |
+| `POST /api/events` | Створити чернетку разом із місцем проведення |
+| `PUT /api/events/{id}` | Оновити чернетку |
+| `POST /api/events/{id}/publish` | Опублікувати подію |
+| `POST /api/events/{id}/finish` | Завершити подію |
+| `POST /api/events/{id}/cancel` | Скасувати подію |
+| `DELETE /api/events/{id}` | М’яко видалити подію |
+| `PUT` / `DELETE /api/events/{id}/tags/{tagId}` | Додати або прибрати тег |
+| `GET /api/categories`, `/api/organizers`, `/api/tags` | Отримати довідники |
 
-Основні операції: `POST /api/ticket-types`, `PUT /api/ticket-types/{id}/price`, `POST /api/reservations`, `GET /api/reservations/{id}`, `POST /api/reservations/{id}/confirm`, `POST /api/reservations/{id}/cancel`, `POST /api/tickets/{publicId}/use`. POST-запити повертають `201 Created` з Location; невалідне тіло — `400 ValidationProblemDetails`, відсутній ресурс — `404 ProblemDetails`, конфлікт стану чи залишку — `409 ProblemDetails`.
-
-### API
-
-- `GET /api/events?search=&status=&categoryId=` — пошук і фільтрація подій.
-- `GET /api/events/{id}` — деталі події, місце проведення та теги.
-- `POST /api/events` — створити чернетку разом із місцем проведення.
-- `PUT /api/events/{id}` — оновити чернетку.
-- `POST /api/events/{id}/publish`, `/finish`, `/cancel` — змінити статус із перевіркою дозволеного переходу.
-- `DELETE /api/events/{id}` — м’яко видалити подію.
-- `PUT`/`DELETE /api/events/{id}/tags/{tagId}` — додати/прибрати тег.
-- `GET /api/categories`, `/api/organizers`, `/api/tags` — отримати довідники.
+Дозволені переходи статусу перевіряються сервісом. SQL-схема, процедури та seed розміщені в `db\p1`.
 
 Приклад тіла `POST /api/events`:
 
@@ -134,31 +149,77 @@ dotnet ef migrations script --idempotent --project Services\Ticketing\Ticketing.
 }
 ```
 
-PowerShell приклад запитів:
+## Ticketing API
+
+Ticketing керує типами квитків, бронюваннями й виданими квитками. Бронювання утримує кількість квитків у транзакції на 15 хвилин; підтвердження випускає квитки, скасування звільняє резерв.
+
+| Метод і шлях | Призначення |
+|---|---|
+| `GET /api/ticket-types?page=1&pageSize=10&search=standard&sortBy=price&sortDir=asc` | Фільтрація та пагінація типів |
+| `GET /api/ticket-types/{id}` | Отримати тип квитка |
+| `POST /api/ticket-types` | Створити тип квитка |
+| `PUT /api/ticket-types/{id}/price` | Змінити ціну |
+| `POST /api/reservations` | Створити бронювання |
+| `GET /api/reservations/{id}` | Отримати бронювання з eager loading |
+| `GET /api/reservations/{id}/explicit` | Отримати бронювання з explicit loading |
+| `GET /api/reservations/{id}/ticket-types` | LINQ-запит через `reservation_items` |
+| `POST /api/reservations/{id}/confirm` | Підтвердити бронювання та випустити квитки |
+| `POST /api/reservations/{id}/cancel` | Скасувати бронювання й звільнити резерв |
+| `POST /api/tickets/{publicId}/use` | Позначити квиток використаним |
+
+POST-запити створення повертають `201 Created`; помилка валідації — `400`, відсутній ресурс — `404`, конфлікт статусу чи залишку — `409`. Для створення ідемпотентного SQL-скрипту міграцій:
 
 ```powershell
-$event = @{
-  organizerId = 1
-  categoryId = 1
-  title = "Demo event"
-  startsAt = "2099-06-15T18:00:00+03:00"
-  endsAt = "2099-06-15T21:00:00+03:00"
-  venue = @{ name = "Central Hall"; address = "1 Main Street"; city = "Kyiv"; country = "Ukraine"; capacity = 500 }
-} | ConvertTo-Json -Depth 4
-Invoke-RestMethod -Method Post -Uri http://localhost:5031/api/events -ContentType "application/json" -Body $event
-Invoke-RestMethod -Method Get -Uri "http://localhost:5031/api/events?status=PUBLISHED"
+dotnet ef migrations script --idempotent --project Services\Ticketing\Ticketing.Dal --startup-project Services\Ticketing\Ticketing.Api --output db\p2\migrations.sql
 ```
 
-Помилки валідації, відсутніх ресурсів і конфліктів повертаються як ProblemDetails.
+## Reviews API
 
-## Лабораторна 4: Reviews API / Clean Architecture та MongoDB
+Reviews використовує Clean Architecture: контролери передають команди й запити через MediatR, а Infrastructure працює з MongoDB. Відгук зберігає автора, фото й коментарі як вкладені дані.
 
-`Services/Reviews` містить окремий мікросервіс із чотирма проєктами та напрямком залежностей `Api → Application → Domain`, `Api → Infrastructure → Application/Domain`. Контролери передають кожну команду й запит через MediatR. Pipeline behaviors виконують логування, вимірювання часу, валідацію та обробку винятків; Application визначає репозиторні інтерфейси, а Infrastructure реалізує їх через MongoDB.
+| Метод і шлях | Призначення |
+|---|---|
+| `GET /api/reviews?eventPublicId=&search=&page=1&pageSize=20` | Список і пошук відгуків |
+| `GET /api/reviews/{id}` | Отримати відгук за Mongo ObjectId |
+| `POST /api/reviews` | Створити відгук |
+| `PUT /api/reviews/{id}` | Оновити відгук із перевіркою `expectedVersion` у тілі |
+| `DELETE /api/reviews/{id}?expectedVersion=1` | Видалити відгук із перевіркою версії |
 
-Домен зберігає відгук із вкладеними `author`, `comments` і `photos`, Value Objects `Author` та `Email`, інкапсульованим станом і версією для оптимістичної конкурентності. BSON-правила налаштовуються в Infrastructure через `BsonClassMap`; створюються індекси `{ eventPublicId: 1, createdAt: -1 }`, текстовий індекс відгуків і унікальні індекси `{ eventPublicId, userPublicId }` та `ticketPublicId`. Під час старту сервіс створює індекси й додає два демонстраційні відгуки лише коли колекція порожня.
+Створення приймає `eventPublicId`, `eventTitleSnapshot`, `ticketPublicId`, `userPublicId`, `displayName`, необов’язкові `avatarUrl`/`authorEmail`, `rating` від 1 до 5, `text` і `photos`. Один користувач може залишити не більше одного відгуку на подію; квиток не може бути використаний для кількох відгуків. Перевірка квитка через Ticketing потребує міжсервісної інтеграції. Конфлікт конкурентної зміни повертає `409`; валідація — `400`, відсутність — `404`.
 
-Запустіть `Platform.AppHost` за інструкціями вище: Aspire підійме PostgreSQL і MongoDB, автоматично передасть connection strings, а Reviews API застосує власні індекси й seed. Для окремого запуску задайте `MongoDb:ConnectionString` та `MongoDb:DatabaseName` у конфігурації. MongoDB health check: `GET /health`; Swagger доступний на `/swagger` у Development.
+Для пошуку створюються індекси за подією/датою й текстом та унікальні індекси за парою подія-користувач і за квитком. Для AutoMapper 16 задайте ліцензійний ключ через `AutoMapper:LicenseKey` або `AUTOMAPPER_LICENSE_KEY`.
 
-Основні маршрути: `GET /api/reviews?eventPublicId=&search=&page=1&pageSize=20`, `GET /api/reviews/{objectId}`, `POST /api/reviews`, `PUT /api/reviews/{objectId}`, `DELETE /api/reviews/{objectId}?expectedVersion=1`. Створення приймає `eventPublicId`, `eventTitleSnapshot`, `ticketPublicId`, `userPublicId`, `displayName`, необов'язкові `avatarUrl`/`authorEmail`, `rating` (1–5), `text` і `photos`. Оновлення та видалення вимагають `expectedVersion`; конкурентна зміна повертає 409. Один користувач може створити лише один відгук на подію. Помилки валідації повертаються як `400 ValidationProblemDetails`, відсутність — `404 ProblemDetails`, конфлікт — `409 ProblemDetails`, недоступна MongoDB — `503 ProblemDetails`.
+## Конфігурація та відновлення
 
-Для AutoMapper 16 передайте Community license key через `AutoMapper:LicenseKey` або змінну середовища `AUTOMAPPER_LICENSE_KEY`.
+- Не застосовуйте `db\p1\schema.sql` повторно до вже створеної схеми.
+- Не застосовуйте `db\p2\schema.sql` перед EF Core міграціями.
+- Для окремого запуску Event Catalog задайте `ConnectionStrings:EventCatalog`, Ticketing — `ConnectionStrings:Ticketing`, Reviews — `MongoDb:ConnectionString` і `MongoDb:DatabaseName`.
+- Якщо PostgreSQL або MongoDB зі старого volume відхиляє пароль AppHost, використовуйте окремий названий volume для нової лабораторної або синхронізуйте пароль бази з параметром. Не видаляйте старі volumes: у них можуть бути потрібні дані.
+
+## Структура репозиторію та ERD
+
+- `Platform.AppHost` — Aspire AppHost.
+- `Services\EventCatalog`, `Services\Ticketing`, `Services\Reviews` — сервіси.
+- `db\p1`, `db\p2`, `db\p3` — SQL/JavaScript схеми, seed і приклади документів.
+- `docs\event-service-erd.drawio`, `docs\ticketing-service-erd.drawio`, `docs\payment-service-erd.drawio` — ERD-діаграми. Відкрийте їх у [diagrams.net](https://app.diagrams.net/). ERD Payments & Feedback показує цільову модель і не означає, що відповідні API вже реалізовані.
+
+## Лабораторна №5: Aspire, Gateway та Aggregator
+
+`Platform.AppHost` оркеструє PostgreSQL, MongoDB, три API, `Aggregator` і `ApiGateway`. Бази запускаються перед API; Aggregator чекає на Orders і Reviews, Gateway — на всі сервіси. Gateway слухає фіксований порт `5000`.
+
+### Запити через Gateway
+
+| Метод і шлях | Призначення |
+|---|---|
+| `GET /api/catalog/events` | Проксі до Event Catalog (`/api/events`) |
+| `GET /api/orders/reservations/{id}` | Проксі до Ticketing (`/api/reservations/{id}`) |
+| `GET /api/reviews?eventPublicId=...` | Проксі до Reviews |
+| `GET /api/aggregator/orders/{id}/full` | Бронювання, відповідні події та відгуки з частковою відповіддю |
+
+YARP використовує логічні імена Aspire для пошуку адрес сервісів. Gateway приймає або генерує `X-Correlation-Id`, повертає його у відповіді та передає далі. Трасування окремо зберігає W3C TraceId. Серверні логи містять метод, шлях, маршрут, статус, тривалість і IP клієнта; недоступний upstream повертає помилку Gateway і записується як попередження.
+
+Aggregator паралельно отримує каталог і відгуки для подій у бронюванні. Недоступний сервіс додає елемент у `Warnings`, доступні дані повертаються зі статусом `200`. Поля з `null` не серіалізуються. Клієнтські HTTP виклики мають тайм-аут 4 секунди й автоматично передають correlation ID.
+
+`Platform.ServiceDefaults` задає service discovery, OpenTelemetry для ASP.NET Core, HttpClient, Npgsql/SQL і MongoDB, а також компактні структуровані Serilog логи в консоль і Aspire Dashboard через OTLP. `/health` перевіряє доступність відповідної бази, `/alive` — liveness процесу.
+
+Для ручної перевірки запустіть AppHost командою з розділу «Швидкий запуск», переконайтеся в Dashboard, що всі ресурси `Running`, і викличте наведені вище маршрути через `http://localhost:5000`. Для трасування агрегованого запиту використовуйте `GET /api/aggregator/orders/{id}/full`; зупинка одного upstream має повертати доступну частину відповіді з попередженням.

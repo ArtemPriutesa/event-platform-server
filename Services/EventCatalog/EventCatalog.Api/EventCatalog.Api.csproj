@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EventCatalog.Bll\EventCatalog.Bll.csproj" />
+    <ProjectReference Include="..\..\..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

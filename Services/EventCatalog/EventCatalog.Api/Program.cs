@@ -7,8 +7,12 @@ using EventCatalog.Api.Extensions;
 using EventCatalog.Domain.Catalog;
 using Npgsql;
 using Dapper;
+using Platform.ServiceDefaults;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddServiceDefaults();
+builder.Host.AddPlatformSerilog("catalog-api");
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -34,6 +38,8 @@ builder.Services.AddAutoMapper(configuration =>
     configuration.AddMaps(typeof(EventCatalogMappingProfile).Assembly));
 
 var app = builder.Build();
+app.UsePlatformRequestContext();
+app.UseSerilogRequestLogging();
 
 app.Services.GetRequiredService<AutoMapper.IConfigurationProvider>().AssertConfigurationIsValid();
 app.UseMiddleware<EventCatalogExceptionMiddleware>();
@@ -53,5 +59,6 @@ app.MapGet("/health", async (NpgsqlDataSource dataSource, CancellationToken canc
     await command.ExecuteScalarAsync(cancellationToken);
     return Results.Ok(new { status = "healthy", database = "connected" });
 }).WithName("DatabaseHealth");
+app.MapHealthChecks("/alive");
 
 app.Run();
